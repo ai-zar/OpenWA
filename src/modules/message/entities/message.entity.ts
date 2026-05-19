@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
 import { jsonColumnType } from '../../../common/utils/column-types';
+import { JsonObjectTransformer } from '../../../common/transformers/json.transformer';
 
 export enum MessageDirection {
   INCOMING = 'incoming',
@@ -52,7 +53,7 @@ export class Message {
   @Column({ type: 'bigint', nullable: true })
   timestamp: number;
 
-  @Column({ type: jsonColumnType(), nullable: true })
+  @Column({ type: jsonColumnType(), nullable: true, transformer: JsonObjectTransformer() })
   metadata: Record<string, unknown>;
 
   @Column({

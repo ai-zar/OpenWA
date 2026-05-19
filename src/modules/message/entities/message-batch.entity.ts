@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { DateTransformer } from '../../../common/transformers/date.transformer';
+import { JsonArrayTransformer, JsonObjectTransformer } from '../../../common/transformers/json.transformer';
 import { jsonColumnType, dateColumnType } from '../../../common/utils/column-types';
 
 export enum BatchStatus {
@@ -50,7 +51,7 @@ export class MessageBatch {
   @Column({ type: 'varchar', default: BatchStatus.PENDING })
   status: BatchStatus;
 
-  @Column({ type: jsonColumnType() })
+  @Column({ type: jsonColumnType(), transformer: JsonArrayTransformer() })
   messages: Array<{
     chatId: string;
     type: string;
@@ -58,17 +59,17 @@ export class MessageBatch {
     variables?: Record<string, string>;
   }>;
 
-  @Column({ type: jsonColumnType(), nullable: true })
+  @Column({ type: jsonColumnType(), nullable: true, transformer: JsonObjectTransformer() })
   options: {
     delayBetweenMessages: number;
     randomizeDelay: boolean;
     stopOnError: boolean;
   };
 
-  @Column({ type: jsonColumnType(), nullable: true })
+  @Column({ type: jsonColumnType(), nullable: true, transformer: JsonObjectTransformer() })
   progress: BatchProgress;
 
-  @Column({ type: jsonColumnType(), nullable: true })
+  @Column({ type: jsonColumnType(), nullable: true, transformer: JsonArrayTransformer() })
   results: BatchMessageResult[];
 
   @Column({ name: 'current_index', default: 0 })
