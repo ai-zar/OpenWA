@@ -40,7 +40,7 @@ fail()   { echo -e "${RED}✗${NC} $*" >&2; exit 1; }
 
 # ----- Required vars -----
 : "${DOMAIN_FULL:?Set DOMAIN_FULL (e.g. wa.chancletazo.es)}"
-: "${LE_EMAIL:?Set LE_EMAIL (email for Let's Encrypt)}"
+: "${LE_EMAIL:?Set LE_EMAIL (email for Lets Encrypt cert issuance)}"
 
 REPO_URL="${REPO_URL:-https://github.com/ai-zar/OpenWA.git}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/OpenWA}"
