@@ -7,6 +7,18 @@ describe('Idempotency Utils', () => {
       expect(key).toBe('msg_ABC123');
     });
 
+    it('should fall back to data.id when messageId is missing', () => {
+      const key = generateIdempotencyKey('message.received', {
+        id: 'false_235106677563495@lid_3A1ADCAA2882295F43D4',
+      });
+      expect(key).toBe('msg_false_235106677563495@lid_3A1ADCAA2882295F43D4');
+    });
+
+    it('should generate msg_unknown only when no id is present', () => {
+      const key = generateIdempotencyKey('message.received', {});
+      expect(key).toBe('msg_unknown');
+    });
+
     it('should generate key for message.ack', () => {
       const key = generateIdempotencyKey('message.ack', { messageId: 'ABC123', ack: 3 });
       expect(key).toBe('ack_ABC123_3');

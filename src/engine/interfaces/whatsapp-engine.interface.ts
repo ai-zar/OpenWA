@@ -22,6 +22,25 @@ export interface MediaInput {
   caption?: string;
 }
 
+/**
+ * A contact resolved from a WhatsApp identifier. Unlike the raw `Contact`,
+ * `phone` is always the real phone number (digits of the canonical `@c.us`
+ * JID), so it is safe to use even when the message arrived from a `@lid`.
+ */
+export interface ResolvedContact {
+  id: string; // canonical @c.us JID
+  phone: string; // plain phone number (digits of id)
+  displayName: string; // name as shown in WhatsApp: saved name → verified name → push name → phone
+  name?: string; // name saved in the address book
+  pushName?: string; // the name the user set for themselves
+  verifiedName?: string; // verified business name (WhatsApp Business)
+  isMyContact: boolean;
+  isBlocked: boolean;
+  profilePicUrl?: string;
+  isLid: boolean; // the original from/author was a @lid identifier
+  lid?: string; // the original @lid JID, if applicable
+}
+
 export interface IncomingMessage {
   id: string;
   from: string;
@@ -32,6 +51,8 @@ export interface IncomingMessage {
   timestamp: number;
   fromMe: boolean;
   isGroup: boolean;
+  author?: string; // raw sender JID inside a group (msg.author)
+  fromContact?: ResolvedContact | null; // resolved sender (null if group/channel/unresolved)
   media?: {
     mimetype: string;
     filename?: string;
@@ -47,6 +68,7 @@ export interface Contact {
   id: string;
   name?: string;
   pushName?: string;
+  verifiedName?: string;
   number: string;
   isMyContact: boolean;
   isBlocked: boolean;
@@ -239,6 +261,7 @@ export interface IWhatsAppEngine {
   // Contacts
   getContacts(): Promise<Contact[]>;
   getContactById(contactId: string): Promise<Contact | null>;
+  resolveContact(jid: string, fallbackName?: string): Promise<ResolvedContact | null>;
   checkNumberExists(number: string): Promise<boolean>;
 
   // Groups - Basic

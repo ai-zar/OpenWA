@@ -32,8 +32,10 @@ export function generateIdempotencyKey(event: string, data: Record<string, unkno
   switch (event) {
     case 'message.received':
     case 'message.sent':
-      // Message ID is unique per message
-      return `msg_${toStr(data.messageId) || toStr(data.id)}`;
+      // Message ID is unique per message. `toStr` returns the literal
+      // 'unknown' (truthy) when a field is missing, so pass an empty fallback
+      // to let `||` actually fall through to the next candidate.
+      return `msg_${toStr(data.messageId, '') || toStr(data.id, '') || 'unknown'}`;
 
     case 'message.ack':
       // Message ID + ack status together are unique

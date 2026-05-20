@@ -59,6 +59,7 @@
     "webhooks": "Webhooks",
     "apiKeys": "מפתחות API",
     "messageTester": "בדיקת הודעות",
+    "messages": "הודעות",
     "infrastructure": "תשתית",
     "plugins": "תוספים",
     "logs": "לוגים"
@@ -314,6 +315,59 @@
     "empty": {
       "title": "לא נמצאו לוגים",
       "description": "הלוגים יופיעו כאן ככל שיבוצעו פעולות"
+    }
+  },
+  "messages": {
+    "title": "הודעות",
+    "subtitle": "עיון בהיסטוריית ההודעות של Session",
+    "searchPlaceholder": "חיפוש לפי מזהה צ'אט או טקסט ההודעה...",
+    "columns": {
+      "direction": "כיוון",
+      "contact": "איש קשר",
+      "chatId": "מזהה צ'אט",
+      "type": "סוג",
+      "body": "הודעה",
+      "status": "סטטוס",
+      "time": "זמן"
+    },
+    "direction": {
+      "incoming": "נכנס",
+      "outgoing": "יוצא"
+    },
+    "detail": {
+      "title": "פרטים",
+      "parties": "מאת / אל",
+      "message": "הודעה",
+      "from": "מאת",
+      "to": "אל",
+      "you": "אתה",
+      "group": "קבוצה",
+      "author": "מחבר",
+      "waId": "מזהה WhatsApp"
+    },
+    "types": {
+      "text": "טקסט",
+      "image": "תמונה",
+      "video": "וידאו",
+      "audio": "אודיו",
+      "ptt": "הודעה קולית",
+      "document": "מסמך",
+      "sticker": "מדבקה",
+      "location": "מיקום",
+      "contact": "איש קשר"
+    },
+    "filters": {
+      "allDirections": "כל הכיוונים",
+      "allTypes": "כל הסוגים",
+      "allStatuses": "כל הסטטוסים"
+    },
+    "empty": {
+      "title": "לא נמצאו הודעות",
+      "description": "ההודעות יופיעו כאן כאשר ה-Session ישלח או יקבל אותן"
+    },
+    "noSessions": {
+      "title": "אין Sessions עדיין",
+      "description": "צור Session תחילה כדי לראות את היסטוריית ההודעות שלו"
     }
   },
   "messageTester": {

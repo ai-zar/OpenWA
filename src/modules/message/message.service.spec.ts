@@ -24,6 +24,7 @@ function createMockEngine() {
     reactToMessage: jest.fn().mockResolvedValue(undefined),
     getMessageReactions: jest.fn().mockResolvedValue([]),
     deleteMessage: jest.fn().mockResolvedValue(undefined),
+    resolveContact: jest.fn().mockResolvedValue(null),
   };
 }
 
@@ -287,26 +288,6 @@ describe('MessageService', () => {
           chatId: 'to@c.us',
           body: '[Forwarded]',
           type: 'forward',
-        }),
-      );
-    });
-  });
-
-  // ── saveIncomingMessage ───────────────────────────────────────────
-
-  describe('saveIncomingMessage', () => {
-    it('should save with INCOMING direction', async () => {
-      await service.saveIncomingMessage('sess-1', {
-        waMessageId: 'wa-in-1',
-        chatId: 'sender@c.us',
-        body: 'Hi there',
-        type: 'text',
-      });
-
-      expect(repository.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          sessionId: 'sess-1',
-          direction: MessageDirection.INCOMING,
         }),
       );
     });

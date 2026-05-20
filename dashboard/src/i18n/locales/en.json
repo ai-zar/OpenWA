@@ -59,6 +59,7 @@
     "webhooks": "Webhooks",
     "apiKeys": "API Keys",
     "messageTester": "Message Tester",
+    "messages": "Messages",
     "infrastructure": "Infrastructure",
     "plugins": "Plugins",
     "logs": "Logs"
@@ -314,6 +315,59 @@
     "empty": {
       "title": "No logs found",
       "description": "Audit logs will appear here as actions are performed"
+    }
+  },
+  "messages": {
+    "title": "Messages",
+    "subtitle": "Browse the message history of a session",
+    "searchPlaceholder": "Search by chat ID or message text...",
+    "columns": {
+      "direction": "Direction",
+      "contact": "Contact",
+      "chatId": "Chat ID",
+      "type": "Type",
+      "body": "Message",
+      "status": "Status",
+      "time": "Time"
+    },
+    "direction": {
+      "incoming": "In",
+      "outgoing": "Out"
+    },
+    "detail": {
+      "title": "Details",
+      "parties": "From / To",
+      "message": "Message",
+      "from": "From",
+      "to": "To",
+      "you": "You",
+      "group": "Group",
+      "author": "Author",
+      "waId": "WhatsApp ID"
+    },
+    "types": {
+      "text": "Text",
+      "image": "Image",
+      "video": "Video",
+      "audio": "Audio",
+      "ptt": "Voice",
+      "document": "Document",
+      "sticker": "Sticker",
+      "location": "Location",
+      "contact": "Contact"
+    },
+    "filters": {
+      "allDirections": "All directions",
+      "allTypes": "All types",
+      "allStatuses": "All statuses"
+    },
+    "empty": {
+      "title": "No messages found",
+      "description": "Messages will appear here once the session sends or receives them"
+    },
+    "noSessions": {
+      "title": "No sessions yet",
+      "description": "Create a session first to see its message history"
     }
   },
   "messageTester": {

@@ -74,6 +74,57 @@ export interface MessageResponse {
   timestamp: number;
 }
 
+export type MessageDirection = 'incoming' | 'outgoing';
+
+export interface ResolvedContact {
+  id: string;
+  phone: string;
+  displayName: string;
+  name?: string;
+  pushName?: string;
+  verifiedName?: string;
+  isMyContact: boolean;
+  isBlocked: boolean;
+  profilePicUrl?: string;
+  isLid: boolean;
+  lid?: string;
+}
+
+export interface Message {
+  id: string;
+  sessionId: string;
+  waMessageId?: string;
+  chatId: string;
+  from: string;
+  to: string;
+  body?: string;
+  type: string;
+  direction: MessageDirection;
+  timestamp?: number;
+  fromContact?: ResolvedContact | null;
+  toContact?: ResolvedContact | null;
+  author?: string | null;
+  isGroup?: boolean;
+  status: string;
+  createdAt: string;
+}
+
+export interface MessagesResponse {
+  messages: Message[];
+  total: number;
+}
+
+export interface Contact {
+  id: string;
+  name?: string;
+  pushName?: string;
+  verifiedName?: string;
+  number: string;
+  isMyContact: boolean;
+  isBlocked: boolean;
+  profilePicUrl?: string;
+}
+
 export interface HealthStatus {
   status: 'ok' | 'error';
   timestamp?: string;
@@ -265,6 +316,33 @@ export const auditApi = {
 // =============================================================================
 
 export const messageApi = {
+  getMessages: (
+    sessionId: string,
+    params?: {
+      chatId?: string;
+      search?: string;
+      direction?: string;
+      type?: string;
+      status?: string;
+      sortBy?: string;
+      sortOrder?: string;
+      limit?: number;
+      offset?: number;
+    },
+  ) => {
+    const query = new URLSearchParams();
+    if (params?.chatId) query.set('chatId', params.chatId);
+    if (params?.search) query.set('search', params.search);
+    if (params?.direction) query.set('direction', params.direction);
+    if (params?.type) query.set('type', params.type);
+    if (params?.status) query.set('status', params.status);
+    if (params?.sortBy) query.set('sortBy', params.sortBy);
+    if (params?.sortOrder) query.set('sortOrder', params.sortOrder);
+    if (params?.limit != null) query.set('limit', String(params.limit));
+    if (params?.offset != null) query.set('offset', String(params.offset));
+    const queryStr = query.toString();
+    return request<MessagesResponse>(`/sessions/${sessionId}/messages${queryStr ? `?${queryStr}` : ''}`);
+  },
   sendText: (sessionId: string, chatId: string, text: string) =>
     request<MessageResponse>(`/sessions/${sessionId}/messages/send-text`, {
       method: 'POST',
@@ -290,6 +368,15 @@ export const messageApi = {
       method: 'POST',
       body: JSON.stringify({ chatId, url, filename }),
     }),
+};
+
+// =============================================================================
+// Contact API
+// =============================================================================
+
+export const contactApi = {
+  get: (sessionId: string, contactId: string) =>
+    request<Contact>(`/sessions/${sessionId}/contacts/${encodeURIComponent(contactId)}`),
 };
 
 // =============================================================================

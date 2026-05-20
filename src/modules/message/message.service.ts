@@ -2,16 +2,31 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SessionService } from '../session/session.service';
-import { SendTextMessageDto, SendMediaMessageDto, MessageResponseDto } from './dto';
-import { MediaInput } from '../../engine/interfaces/whatsapp-engine.interface';
+import { SendTextMessageDto, SendMediaMessageDto, MessageResponseDto, MessageHistoryItemDto } from './dto';
+import { MediaInput, ResolvedContact } from '../../engine/interfaces/whatsapp-engine.interface';
 import { Message, MessageDirection, MessageStatus } from './entities/message.entity';
 import { HookManager } from '../../core/hooks';
 
 export interface GetMessagesOptions {
   chatId?: string;
+  search?: string;
+  direction?: string;
+  type?: string;
+  status?: string;
+  sortBy?: string;
+  sortOrder?: string;
   limit?: number;
   offset?: number;
 }
+
+/** Columns the message history can be sorted by (whitelist for safe ORDER BY). */
+const SORTABLE_COLUMNS: Record<string, string> = {
+  createdAt: 'message.createdAt',
+  timestamp: 'message.timestamp',
+  direction: 'message.direction',
+  type: 'message.type',
+  status: 'message.status',
+};
 
 @Injectable()
 export class MessageService {
@@ -211,13 +226,16 @@ export class MessageService {
   async getMessages(
     sessionId: string,
     options: GetMessagesOptions = {},
-  ): Promise<{ messages: Message[]; total: number }> {
-    const { chatId, limit = 50, offset = 0 } = options;
+  ): Promise<{ messages: MessageHistoryItemDto[]; total: number }> {
+    const { chatId, search, direction, type, status, sortBy, sortOrder, limit = 50, offset = 0 } = options;
+
+    const sortColumn = SORTABLE_COLUMNS[sortBy ?? ''] ?? SORTABLE_COLUMNS.createdAt;
+    const order: 'ASC' | 'DESC' = String(sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
     const query = this.messageRepository
       .createQueryBuilder('message')
       .where('message.sessionId = :sessionId', { sessionId })
-      .orderBy('message.createdAt', 'DESC')
+      .orderBy(sortColumn, order)
       .skip(offset)
       .take(limit);
 
@@ -225,8 +243,65 @@ export class MessageService {
       query.andWhere('message.chatId = :chatId', { chatId });
     }
 
+    if (search) {
+      // Case-insensitive match on body or chatId (works on SQLite and Postgres).
+      query.andWhere('(LOWER(message.body) LIKE LOWER(:search) OR LOWER(message.chatId) LIKE LOWER(:search))', {
+        search: `%${search}%`,
+      });
+    }
+
+    if (direction) {
+      query.andWhere('message.direction = :direction', { direction });
+    }
+
+    if (type) {
+      // Outgoing text is stored as 'text', incoming as 'chat' — treat them alike.
+      if (type === 'chat' || type === 'text') {
+        query.andWhere('message.type IN (:...textTypes)', { textTypes: ['chat', 'text'] });
+      } else {
+        query.andWhere('message.type = :type', { type });
+      }
+    }
+
+    if (status) {
+      query.andWhere('message.status = :status', { status });
+    }
+
     const [messages, total] = await query.getManyAndCount();
-    return { messages, total };
+    return { messages: messages.map(m => this.toMessageView(m)), total };
+  }
+
+  /**
+   * Map a persisted Message entity to the public API shape. Lifts the resolved
+   * contacts out of the `metadata` JSON column to the top level so the
+   * `GET /messages` response matches the webhook payload. This isolates the
+   * DB storage shape from the API contract.
+   */
+  private toMessageView(m: Message): MessageHistoryItemDto {
+    const meta = (m.metadata ?? {}) as {
+      fromContact?: ResolvedContact | null;
+      toContact?: ResolvedContact | null;
+      author?: string | null;
+      isGroup?: boolean;
+    };
+    return {
+      id: m.id,
+      sessionId: m.sessionId,
+      waMessageId: m.waMessageId,
+      chatId: m.chatId,
+      from: m.from,
+      to: m.to,
+      body: m.body,
+      type: m.type,
+      direction: m.direction,
+      timestamp: m.timestamp,
+      fromContact: meta.fromContact ?? null,
+      toContact: meta.toContact ?? null,
+      author: meta.author ?? null,
+      isGroup: meta.isGroup ?? false,
+      status: m.status,
+      createdAt: m.createdAt,
+    };
   }
 
   // ========== Phase 3: Extended Messaging ==========
@@ -402,18 +477,6 @@ export class MessageService {
   }
 
   /**
-   * Save incoming message (called from session webhook dispatch)
-   */
-  async saveIncomingMessage(sessionId: string, data: Partial<Message>): Promise<Message> {
-    const message = this.messageRepository.create({
-      ...data,
-      sessionId,
-      direction: MessageDirection.INCOMING,
-    });
-    return this.messageRepository.save(message);
-  }
-
-  /**
    * Save outgoing message to database.
    * When called before sending, creates a record with PENDING status.
    */
@@ -429,6 +492,16 @@ export class MessageService {
     },
   ): Promise<Message> {
     const session = await this.sessionService.findOne(sessionId);
+
+    // Resolve the recipient so the stored message carries their WhatsApp name.
+    // Best-effort: a failure must never block the send.
+    let toContact: ResolvedContact | null = null;
+    try {
+      toContact = await this.getEngine(sessionId).resolveContact(data.chatId);
+    } catch {
+      // ignore — recipient resolution is optional
+    }
+
     const message = this.messageRepository.create({
       sessionId,
       waMessageId: data.waMessageId,
@@ -440,6 +513,7 @@ export class MessageService {
       direction: MessageDirection.OUTGOING,
       timestamp: data.timestamp,
       status: data.status ?? MessageStatus.PENDING,
+      metadata: toContact ? { toContact } : undefined,
     });
     return this.messageRepository.save(message);
   }

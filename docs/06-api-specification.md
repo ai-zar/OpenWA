@@ -1276,19 +1276,34 @@ flowchart TB
     "id": "true_628123456789@c.us_3EB0ABC123",
     "from": "628123456789@c.us",
     "to": "628987654321@c.us",
+    "chatId": "628123456789@c.us",
     "body": "Hello!",
     "type": "chat",
-    "waTimestamp": 1706868000,
-    "timestamp": "2025-02-02T10:00:00.000Z",
+    "timestamp": 1706868000,
+    "fromMe": false,
     "isGroup": false,
-    "hasMedia": false,
-    "contact": {
+    "author": null,
+    "fromContact": {
+      "id": "628123456789@c.us",
+      "phone": "628123456789",
       "name": "John Doe",
-      "pushName": "John"
+      "pushName": "John",
+      "isMyContact": false,
+      "isBlocked": false,
+      "isLid": false
     }
   }
 }
 ```
+
+`fromContact` is the resolved sender. When WhatsApp delivers `from` as a `@lid`
+identifier (no phone number), OpenWA resolves it and exposes the real number in
+`fromContact.phone`. In groups, `from` is the group JID and `fromContact`
+resolves the actual author (`data.author`). It is `null` when the sender cannot
+be resolved to a person (groups/channels).
+
+`GET /api/sessions/:sessionId/messages` returns `fromContact` / `toContact` as
+top-level fields too, so the persisted shape matches this webhook payload.
 
 ### message.ack
 

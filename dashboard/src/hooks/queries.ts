@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   sessionApi,
   webhookApi,
@@ -6,6 +6,8 @@ import {
   auditApi,
   infraApi,
   pluginsApi,
+  messageApi,
+  contactApi,
   type Webhook,
 } from '../services/api';
 
@@ -19,6 +21,8 @@ export const queryKeys = {
   apiKeys: ['apiKeys'] as const,
   logs: (params: { severity?: string; page: number; limit: number }) =>
     ['logs', params] as const,
+  messages: (sessionId: string, params: MessagesQueryParams) => ['messages', sessionId, params] as const,
+  contact: (sessionId: string, contactId: string) => ['contact', sessionId, contactId] as const,
   infraStatus: ['infra', 'status'] as const,
   plugins: ['plugins'] as const,
   engines: ['engines'] as const,
@@ -190,6 +194,51 @@ export function useLogsQuery(params: { severity?: string; page: number; limit: n
         offset: (params.page - 1) * params.limit,
       }),
     staleTime: 15_000,
+  });
+}
+
+// ── Message Queries ───────────────────────────────────────────────────
+
+export interface MessagesQueryParams {
+  search?: string;
+  direction?: string;
+  type?: string;
+  status?: string;
+  sortBy?: string;
+  sortOrder?: string;
+  page: number;
+  limit: number;
+}
+
+export function useMessagesQuery(sessionId: string, params: MessagesQueryParams) {
+  return useQuery({
+    queryKey: queryKeys.messages(sessionId, params),
+    queryFn: () =>
+      messageApi.getMessages(sessionId, {
+        search: params.search,
+        direction: params.direction,
+        type: params.type,
+        status: params.status,
+        sortBy: params.sortBy,
+        sortOrder: params.sortOrder,
+        limit: params.limit,
+        offset: (params.page - 1) * params.limit,
+      }),
+    enabled: !!sessionId,
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
+  });
+}
+
+// ── Contact Queries ───────────────────────────────────────────────────
+
+export function useContactQuery(sessionId: string, contactId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.contact(sessionId, contactId),
+    queryFn: () => contactApi.get(sessionId, contactId),
+    enabled: enabled && !!sessionId && !!contactId,
+    retry: false,
+    staleTime: 60_000,
   });
 }
 

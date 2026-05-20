@@ -2,7 +2,7 @@ import { Controller, Post, Get, Param, Body, Query, HttpCode, HttpStatus } from 
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { MessageService } from './message.service';
 import { BulkMessageService } from './bulk-message.service';
-import { SendTextMessageDto, SendMediaMessageDto, MessageResponseDto } from './dto';
+import { SendTextMessageDto, SendMediaMessageDto, MessageResponseDto, MessageHistoryResponseDto } from './dto';
 import { SendBulkMessageDto, BulkMessageResponseDto } from './dto/bulk-message.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
@@ -18,21 +18,45 @@ export class MessageController {
   @Get()
   @ApiOperation({ summary: 'Get message history for a session' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
-  @ApiQuery({ name: 'chatId', required: false, description: 'Filter by chat ID' })
+  @ApiQuery({ name: 'chatId', required: false, description: 'Filter by exact chat ID' })
+  @ApiQuery({ name: 'search', required: false, description: 'Case-insensitive search in message body or chat ID' })
+  @ApiQuery({ name: 'direction', required: false, enum: ['incoming', 'outgoing'], description: 'Filter by direction' })
+  @ApiQuery({ name: 'type', required: false, description: 'Filter by message type (chat, image, video, ...)' })
+  @ApiQuery({ name: 'status', required: false, description: 'Filter by status (pending, sent, delivered, read, failed)' })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    enum: ['createdAt', 'timestamp', 'direction', 'type', 'status'],
+    description: 'Sort column (default createdAt)',
+  })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'], description: 'Sort order (default DESC)' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Max messages to return (default 50)' })
   @ApiQuery({ name: 'offset', required: false, type: Number, description: 'Offset for pagination' })
   @ApiResponse({
     status: 200,
-    description: 'Message history',
+    description: 'Message history. Incoming messages include the resolved sender in fromContact.',
+    type: MessageHistoryResponseDto,
   })
   async getMessages(
     @Param('sessionId') sessionId: string,
     @Query('chatId') chatId?: string,
+    @Query('search') search?: string,
+    @Query('direction') direction?: string,
+    @Query('type') type?: string,
+    @Query('status') status?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
     return this.messageService.getMessages(sessionId, {
       chatId,
+      search,
+      direction,
+      type,
+      status,
+      sortBy,
+      sortOrder,
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
     });

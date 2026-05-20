@@ -9,9 +9,10 @@ import {
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, In, DataSource } from 'typeorm';
 import { Session, SessionStatus } from './entities/session.entity';
+import { Message, MessageDirection } from '../message/entities/message.entity';
 import { CreateSessionDto } from './dto';
 import { EngineFactory } from '../../engine/engine.factory';
-import { IWhatsAppEngine, EngineStatus } from '../../engine/interfaces/whatsapp-engine.interface';
+import { IWhatsAppEngine, EngineStatus, IncomingMessage } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
 import { EventsGateway } from '../events/events.gateway';
 import { WebhookService } from '../webhook/webhook.service';
@@ -37,6 +38,8 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
   constructor(
     @InjectRepository(Session, 'data')
     private readonly sessionRepository: Repository<Session>,
+    @InjectRepository(Message, 'data')
+    private readonly messageRepository: Repository<Message>,
     @InjectDataSource('data')
     private readonly dataSource: DataSource,
     private readonly engineFactory: EngineFactory,
@@ -187,8 +190,20 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
   async start(id: string): Promise<Session> {
     const session = await this.findOne(id);
 
-    if (this.engines.has(id)) {
-      throw new BadRequestException('Session is already started');
+    const existing = this.engines.get(id);
+    if (existing) {
+      const liveStatuses: EngineStatus[] = [
+        EngineStatus.READY,
+        EngineStatus.INITIALIZING,
+        EngineStatus.QR_READY,
+        EngineStatus.AUTHENTICATING,
+      ];
+      if (liveStatuses.includes(existing.getStatus())) {
+        throw new BadRequestException('Session is already started');
+      }
+      // A previous engine is left over in a dead state (failed/disconnected) —
+      // discard it so the session can be re-initialized.
+      await this.cleanupEngine(id);
     }
 
     // Execute hook before starting
@@ -217,12 +232,30 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
     return this.findOne(id);
   }
 
+  /** Discard an engine instance and remove it from the active map. */
+  private async cleanupEngine(id: string): Promise<void> {
+    const engine = this.engines.get(id);
+    this.engines.delete(id);
+    if (engine) {
+      try {
+        await engine.destroy();
+      } catch (error) {
+        this.logger.warn(`Failed to destroy stale engine for ${id}`, String(error));
+      }
+    }
+  }
+
   private async initializeEngine(id: string, session: Session): Promise<void> {
     this.logger.log(`Initializing engine for session: ${session.name}`, {
       sessionId: id,
       action: 'engine_init',
       proxyEnabled: !!session.proxyUrl,
     });
+
+    // Drop any leftover engine (e.g. a failed one or a reconnect attempt).
+    if (this.engines.has(id)) {
+      await this.cleanupEngine(id);
+    }
 
     const engine = this.engineFactory.create({
       sessionId: session.name,
@@ -306,10 +339,12 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
               return;
             }
 
+            // Persist the incoming message (fromContact is kept in metadata)
+            void this.persistIncomingMessage(id, finalMessage);
             // Dispatch to webhooks with potentially modified message
-            void this.webhookService.dispatch(id, 'message.received', finalMessage as Record<string, unknown>);
+            void this.webhookService.dispatch(id, 'message.received', finalMessage);
             // Emit real-time event to WebSocket clients
-            this.eventsGateway.emitMessage(id, finalMessage as Record<string, unknown>);
+            this.eventsGateway.emitMessage(id, finalMessage);
           });
       },
       onDisconnected: (reason: string): void => {
@@ -351,6 +386,47 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
     });
 
     await this.updateStatus(id, SessionStatus.INITIALIZING);
+  }
+
+  /**
+   * Persist an incoming WhatsApp message so it shows up in `GET /messages`.
+   * The resolved `fromContact` is stored in `metadata` so reads are augmented
+   * without extra lookups. De-duplicated by `waMessageId`. Never throws —
+   * persistence must not block message delivery.
+   */
+  private async persistIncomingMessage(sessionId: string, message: IncomingMessage): Promise<void> {
+    try {
+      const waMessageId = message.id;
+      if (waMessageId) {
+        const existing = await this.messageRepository.findOne({ where: { sessionId, waMessageId } });
+        if (existing) return; // duplicate event / webhook retry — already stored
+      }
+
+      const entity = this.messageRepository.create({
+        sessionId,
+        waMessageId,
+        chatId: message.chatId,
+        from: message.from,
+        to: message.to,
+        body: message.body,
+        type: message.type,
+        direction: MessageDirection.INCOMING,
+        timestamp: message.timestamp,
+        metadata: {
+          fromContact: message.fromContact ?? null,
+          author: message.author ?? null,
+          isGroup: Boolean(message.isGroup),
+          fromMe: Boolean(message.fromMe),
+          ...(message.quotedMessage ? { quotedMessage: message.quotedMessage } : {}),
+        },
+      });
+      await this.messageRepository.save(entity);
+    } catch (error) {
+      this.logger.error('Failed to persist incoming message', String(error), {
+        sessionId,
+        messageId: message.id,
+      });
+    }
   }
 
   private scheduleReconnect(id: string, session: Session): void {

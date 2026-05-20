@@ -28,6 +28,9 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    # Give Chromium time to close cleanly on rebuild/stop so the WhatsApp
+    # session profile is flushed and the pairing survives.
+    stop_grace_period: 30s
     healthcheck:
       test:
         [

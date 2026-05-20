@@ -15,7 +15,9 @@ export const JsonArrayTransformer = <T = unknown>(): ValueTransformer => ({
   to: (value: T[] | null | undefined): T[] | null | undefined => value,
 });
 
-export const JsonObjectTransformer = <T extends Record<string, unknown> = Record<string, unknown>>(): ValueTransformer => ({
+export const JsonObjectTransformer = <
+  T extends Record<string, unknown> = Record<string, unknown>,
+>(): ValueTransformer => ({
   from: (value: unknown): T => parse<T>(value, {} as T),
   to: (value: T | null | undefined): T | null | undefined => value,
 });

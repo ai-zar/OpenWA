@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode';
 import * as path from 'path';
+import * as fs from 'fs';
 import {
   IWhatsAppEngine,
   EngineStatus,
@@ -10,6 +11,7 @@ import {
   MediaInput,
   IncomingMessage,
   Contact,
+  ResolvedContact,
   Group,
   GroupInfo,
   GroupParticipant,
@@ -28,6 +30,7 @@ import {
   PaginatedProducts,
 } from '../interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
+import { digitsFromJid, isGroupJid, isLid, isNewsletterJid, normalizeToJid } from '../../common/utils/jid.util';
 import {
   GroupChat,
   MessageWithReactions,
@@ -57,6 +60,12 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   private phoneNumber: string | null = null;
   private pushName: string | null = null;
   private callbacks: EngineEventCallbacks = {};
+
+  // Cache of resolved contacts, keyed by the original JID (LID or @c.us).
+  // The LID↔phone mapping is stable, so a successful resolution is cached
+  // for the session lifetime. Failures are NOT cached (may be transient).
+  private readonly contactCache = new Map<string, ResolvedContact>();
+  private static readonly MAX_CONTACT_CACHE = 1000;
 
   constructor(private readonly config: WhatsAppWebJsConfig) {
     super();
@@ -88,6 +97,11 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         );
       }
 
+      // Remove stale Chromium profile locks left behind when the previous
+      // process was killed abruptly (e.g. a container rebuild) — otherwise
+      // the browser refuses to launch ("profile appears to be in use").
+      this.cleanStaleChromiumLocks();
+
       this.client = new Client({
         authStrategy: new LocalAuth({
           clientId: this.config.sessionId,
@@ -104,6 +118,22 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     } catch (error) {
       this.setStatus(EngineStatus.FAILED);
       throw error;
+    }
+  }
+
+  /**
+   * Delete stale Chromium singleton locks from this session's profile dir.
+   * Safe: these are lock markers (not auth data) and are only ever stale here
+   * because the engine is not running when initialize() is called.
+   */
+  private cleanStaleChromiumLocks(): void {
+    const profileDir = path.join(path.resolve(this.config.sessionDataPath), `session-${this.config.sessionId}`);
+    for (const lock of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+      try {
+        fs.rmSync(path.join(profileDir, lock), { force: true });
+      } catch (error) {
+        this.logger.warn(`Could not remove stale lock ${lock}`, String(error));
+      }
     }
   }
 
@@ -143,6 +173,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
     this.client.on('message', async msg => {
       try {
+        const isGroup = isGroupJid(msg.from);
+        const author = msg.author || undefined;
         const incomingMessage: IncomingMessage = {
           id: msg.id._serialized,
           from: msg.from,
@@ -152,8 +184,14 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           type: msg.type,
           timestamp: msg.timestamp,
           fromMe: msg.fromMe,
-          isGroup: msg.from.endsWith('@g.us'),
+          isGroup,
+          author,
         };
+
+        // Resolve the human sender (in a group `from` is the group, not a person).
+        const senderJid = isGroup ? author : msg.from;
+        const notifyName = (msg as unknown as { _data?: { notifyName?: string } })._data?.notifyName || undefined;
+        incomingMessage.fromContact = senderJid ? await this.resolveContact(senderJid, notifyName) : null;
 
         // Handle media
         if (msg.hasMedia) {
@@ -330,6 +368,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       id: c.id._serialized,
       name: c.name || undefined,
       pushName: c.pushname || undefined,
+      verifiedName: (c as unknown as { verifiedName?: string }).verifiedName || undefined,
       number: c.number,
       isMyContact: c.isMyContact,
       isBlocked: c.isBlocked,
@@ -344,6 +383,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         id: contact.id._serialized,
         name: contact.name || undefined,
         pushName: contact.pushname || undefined,
+        verifiedName: (contact as unknown as { verifiedName?: string }).verifiedName || undefined,
         number: contact.number,
         isMyContact: contact.isMyContact,
         isBlocked: contact.isBlocked,
@@ -358,6 +398,87 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.ensureReady();
     const numberId = await this.client!.getNumberId(number);
     return numberId !== null;
+  }
+
+  /**
+   * Resolve a sender JID to a ResolvedContact with the real phone number and
+   * the name as shown in WhatsApp.
+   *
+   * - `@lid`: looks up the contact and uses its canonical `@c.us` JID.
+   * - `@c.us` / `@s.whatsapp.net`: enriches with name/avatar; phone = JID digits.
+   * - `@g.us` / `@newsletter`: no phone → returns null.
+   *
+   * `fallbackName` is the push name carried by the message envelope
+   * (`notifyName`), used when the contact store has no name yet.
+   *
+   * Successful resolutions are cached for the session lifetime. Returns null
+   * (without caching) on failure so the lookup can be retried later.
+   */
+  async resolveContact(jid: string, fallbackName?: string): Promise<ResolvedContact | null> {
+    if (!jid) return null;
+
+    const cached = this.contactCache.get(jid);
+    if (cached) {
+      // Backfill the name if a later message carries one the cache lacked.
+      if (fallbackName && !cached.name && !cached.verifiedName && !cached.pushName) {
+        cached.pushName = fallbackName;
+        cached.displayName = fallbackName;
+      }
+      return cached;
+    }
+
+    // Groups and channels have no associated phone number.
+    if (isGroupJid(jid) || isNewsletterJid(jid)) return null;
+
+    try {
+      this.ensureReady();
+      const contact = await this.client!.getContactById(jid);
+      const canonicalJid = contact.id._serialized || jid;
+      const phone = digitsFromJid(canonicalJid);
+
+      const name = contact.name || undefined;
+      const pushName = contact.pushname || fallbackName || undefined;
+      const verifiedName = (contact as unknown as { verifiedName?: string }).verifiedName || undefined;
+
+      let profilePicUrl: string | undefined;
+      try {
+        profilePicUrl = (await this.client!.getProfilePicUrl(canonicalJid)) || undefined;
+      } catch {
+        // Profile picture is optional (private / not set) — ignore.
+      }
+
+      const resolved: ResolvedContact = {
+        id: canonicalJid,
+        phone,
+        // Mirror WhatsApp's own display priority.
+        displayName: name || verifiedName || pushName || phone,
+        name,
+        pushName,
+        verifiedName,
+        isMyContact: Boolean(contact.isMyContact),
+        isBlocked: Boolean(contact.isBlocked),
+        profilePicUrl,
+        isLid: isLid(jid),
+        lid: isLid(jid) ? jid : undefined,
+      };
+
+      this.cacheContact(jid, resolved);
+      return resolved;
+    } catch (error) {
+      this.logger.warn(`Failed to resolve contact: ${jid}`, String(error));
+      return null;
+    }
+  }
+
+  private cacheContact(jid: string, contact: ResolvedContact): void {
+    if (this.contactCache.size >= WhatsAppWebJsAdapter.MAX_CONTACT_CACHE) {
+      // Evict the oldest entry (Map preserves insertion order).
+      for (const oldest of this.contactCache.keys()) {
+        this.contactCache.delete(oldest);
+        break;
+      }
+    }
+    this.contactCache.set(jid, contact);
   }
 
   async getGroups(): Promise<Group[]> {
@@ -513,7 +634,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   async createGroup(name: string, participants: string[]): Promise<Group> {
     this.ensureReady();
     // Ensure participant IDs are in correct format
-    const participantIds = participants.map(p => (p.includes('@') ? p : `${p}@c.us`));
+    const participantIds = participants.map(p => normalizeToJid(p));
     const result = await this.client!.createGroup(name, participantIds);
 
     const groupId = String((result as unknown as GroupCreateResult).gid._serialized);
@@ -530,7 +651,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     if (!chat.isGroup) {
       throw new Error('Chat is not a group');
     }
-    const participantIds = participants.map(p => (p.includes('@') ? p : `${p}@c.us`));
+    const participantIds = participants.map(p => normalizeToJid(p));
     await (chat as unknown as GroupChat).addParticipants(participantIds);
   }
 
@@ -540,7 +661,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     if (!chat.isGroup) {
       throw new Error('Chat is not a group');
     }
-    const participantIds = participants.map(p => (p.includes('@') ? p : `${p}@c.us`));
+    const participantIds = participants.map(p => normalizeToJid(p));
     await (chat as unknown as GroupChat).removeParticipants(participantIds);
   }
 
@@ -550,7 +671,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     if (!chat.isGroup) {
       throw new Error('Chat is not a group');
     }
-    const participantIds = participants.map(p => (p.includes('@') ? p : `${p}@c.us`));
+    const participantIds = participants.map(p => normalizeToJid(p));
     await (chat as unknown as GroupChat).promoteParticipants(participantIds);
   }
 
@@ -560,7 +681,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     if (!chat.isGroup) {
       throw new Error('Chat is not a group');
     }
-    const participantIds = participants.map(p => (p.includes('@') ? p : `${p}@c.us`));
+    const participantIds = participants.map(p => normalizeToJid(p));
     await (chat as unknown as GroupChat).demoteParticipants(participantIds);
   }
 

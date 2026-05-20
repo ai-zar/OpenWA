@@ -94,16 +94,39 @@ Start workflows when WhatsApp events occur.
   "event": "message.received",
   "timestamp": "2024-01-15T10:30:00Z",
   "sessionId": "default",
+  "idempotencyKey": "msg_false_235106677563495@lid_3A1ADCAA2882295F43D4",
+  "deliveryId": "dlv_f29a4046-e028-433c-bd97-89a260e7e7ee",
   "data": {
-    "messageId": "3EB0F5A2B4C...",
-    "chatId": "628123456789@c.us",
-    "from": "628123456789@c.us",
+    "id": "false_235106677563495@lid_3A1ADCAA2882295F43D4",
+    "chatId": "235106677563495@lid",
+    "from": "235106677563495@lid",
+    "to": "34666663158@c.us",
     "body": "Hello!",
     "type": "text",
-    "timestamp": 1705312200
+    "timestamp": 1705312200,
+    "fromMe": false,
+    "isGroup": false,
+    "author": null,
+    "fromContact": {
+      "id": "380966807041@c.us",
+      "phone": "380966807041",
+      "name": "Juan Pérez",
+      "pushName": "Juan",
+      "isMyContact": false,
+      "isBlocked": false,
+      "profilePicUrl": "https://pps.whatsapp.net/...",
+      "isLid": true,
+      "lid": "235106677563495@lid"
+    }
   }
 }
 ```
+
+> **`fromContact`** — the resolved sender. WhatsApp (2024+) may deliver `from`
+> as a `@lid` identifier that does **not** contain the phone number. OpenWA
+> resolves it and exposes the real number in `fromContact.phone`. In groups,
+> `from` is the group JID and `fromContact` resolves the actual author. It is
+> `null` for groups/channels that cannot be resolved to a person.
 
 ## Example Workflows
 
