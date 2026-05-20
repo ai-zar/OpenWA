@@ -57,6 +57,7 @@ uploads/
 
 # Docker
 .docker/
+docker-compose.override.yml
 
 # Misc
 *.bak
