@@ -16,7 +16,7 @@
 #   - Reloads Caddy
 #
 # Usage (run as root or via sudo):
-#   DOMAIN_FULL=wa.chancletazo.es LE_EMAIL=you@example.com bash hetzner-setup.sh
+#   DOMAIN_FULL=wa.domain.es LE_EMAIL=you@example.com bash hetzner-setup.sh
 #
 # Optional vars:
 #   REPO_URL              Default: https://github.com/ai-zar/OpenWA.git
@@ -39,7 +39,7 @@ warn()   { echo -e "${YELLOW}⚠${NC} $*"; }
 fail()   { echo -e "${RED}✗${NC} $*" >&2; exit 1; }
 
 # ----- Required vars -----
-: "${DOMAIN_FULL:?Set DOMAIN_FULL (e.g. wa.chancletazo.es)}"
+: "${DOMAIN_FULL:?Set DOMAIN_FULL (e.g. wa.domain.es)}"
 : "${LE_EMAIL:?Set LE_EMAIL (email for Lets Encrypt cert issuance)}"
 
 REPO_URL="${REPO_URL:-https://github.com/ai-zar/OpenWA.git}"
