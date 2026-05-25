@@ -5,6 +5,7 @@ export const WEBHOOK_EVENTS = [
   'message.received',
   'message.sent',
   'message.ack',
+  'message.reaction',
   'message.revoked',
   'session.status',
   'session.qr',
@@ -27,7 +28,7 @@ export class CreateWebhookDto {
 
   @ApiPropertyOptional({
     description: 'Event types to subscribe to',
-    example: ['message.received', 'session.status'],
+    example: ['message.received', 'message.reaction', 'session.status'],
     enum: WEBHOOK_EVENTS,
   })
   @IsOptional()

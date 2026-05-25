@@ -1343,6 +1343,69 @@ top-level fields too, so the persisted shape matches this webhook payload.
 }
 ```
 
+### message.sent
+
+Same `data` shape as `message.received`. `fromMe` is `true`.
+
+### message.reaction
+
+```json
+{
+  "event": "message.reaction",
+  "timestamp": "2025-02-02T10:00:00.000Z",
+  "sessionId": "sess_abc123",
+  "data": {
+    "id": "false_628123456789@c.us_3EB0REACT123",
+    "msgId": "true_628123456789@c.us_3EB0ABC123",
+    "reaction": "👍",
+    "senderId": "628123456789@c.us",
+    "timestamp": 1706868000,
+    "fromMe": false,
+    "ack": 1,
+    "fromContact": {
+      "id": "628123456789@c.us",
+      "phone": "628123456789",
+      "name": "John Doe",
+      "pushName": "John",
+      "isMyContact": false,
+      "isBlocked": false,
+      "isLid": false
+    }
+  }
+}
+```
+
+`reaction` is the emoji. An empty string (`""`) means the user removed their
+previous reaction. `msgId` points to the message being reacted to (not the
+reaction event itself).
+
+### session.qr
+
+```json
+{
+  "event": "session.qr",
+  "timestamp": "2025-02-02T10:00:00.000Z",
+  "sessionId": "sess_abc123",
+  "data": {
+    "qrCode": "data:image/png;base64,..."
+  }
+}
+```
+
+### Reserved Event Types
+
+The following events are declared in the API enum and accepted on subscription,
+but are not yet emitted by the engine. Subscribing is safe (the server will not
+error) but no deliveries will arrive until the corresponding engine hook is
+wired up:
+
+- `message.revoked`
+- `session.authenticated`
+- `session.disconnected`
+- `group.join`
+- `group.leave`
+- `group.update`
+
 ## 6.5 Webhook Signature Verification
 
 ```javascript

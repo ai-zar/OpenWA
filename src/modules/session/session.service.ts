@@ -12,7 +12,7 @@ import { Session, SessionStatus } from './entities/session.entity';
 import { Message, MessageDirection } from '../message/entities/message.entity';
 import { CreateSessionDto } from './dto';
 import { EngineFactory } from '../../engine/engine.factory';
-import { IWhatsAppEngine, EngineStatus, IncomingMessage } from '../../engine/interfaces/whatsapp-engine.interface';
+import { IWhatsAppEngine, EngineStatus, IncomingMessage, IncomingReaction } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
 import { EventsGateway } from '../events/events.gateway';
 import { WebhookService } from '../webhook/webhook.service';
@@ -345,6 +345,29 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
             void this.webhookService.dispatch(id, 'message.received', finalMessage);
             // Emit real-time event to WebSocket clients
             this.eventsGateway.emitMessage(id, finalMessage);
+          });
+      },
+      onMessageReaction: (reaction: IncomingReaction): void => {
+        this.logger.debug(`Reaction ${reaction.reaction || '(removed)'} on ${reaction.msgId}`, {
+          sessionId: id,
+          msgId: reaction.msgId,
+          senderId: reaction.senderId,
+          action: 'message_reaction',
+        });
+
+        // Plain object for dispatch (same pattern as onMessage)
+        const reactionData = { ...reaction };
+
+        // Hook-aware: plugins can short-circuit (e.g. mute reactions on certain msgs)
+        void this.hookManager
+          .execute('message:reaction', reactionData, {
+            sessionId: id,
+            source: 'Engine',
+          })
+          .then(({ continue: shouldContinue, data: finalReaction }) => {
+            if (!shouldContinue) return;
+            void this.webhookService.dispatch(id, 'message.reaction', finalReaction);
+            this.eventsGateway.emitMessageReaction(id, finalReaction);
           });
       },
       onDisconnected: (reason: string): void => {

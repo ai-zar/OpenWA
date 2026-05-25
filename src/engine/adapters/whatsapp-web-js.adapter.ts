@@ -10,6 +10,7 @@ import {
   MessageResult,
   MediaInput,
   IncomingMessage,
+  IncomingReaction,
   Contact,
   ResolvedContact,
   Group,
@@ -230,6 +231,38 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
     this.client.on('message_ack', (msg, ack) => {
       this.callbacks.onMessageAck?.(msg.id._serialized, ack);
+    });
+
+    // Reactions: emitted when a reaction is sent, received, updated or removed.
+    // `reaction.reaction` is an empty string when the user removed their previous
+    // reaction — downstream consumers can use that to invalidate prior state.
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    this.client.on('message_reaction', async reaction => {
+      try {
+        const incoming: IncomingReaction = {
+          id: reaction.id?._serialized || '',
+          msgId: reaction.msgId?._serialized || '',
+          reaction: reaction.reaction || '',
+          senderId: reaction.senderId,
+          timestamp: reaction.timestamp,
+          fromMe: !!(reaction.id as unknown as { fromMe?: boolean })?.fromMe,
+          ack: reaction.ack,
+        };
+
+        // Resolve the reactor's contact (LID → @c.us if needed). Best-effort —
+        // if it fails the consumer still gets the raw senderId.
+        if (incoming.senderId && !incoming.fromMe) {
+          try {
+            incoming.fromContact = await this.resolveContact(incoming.senderId);
+          } catch (error) {
+            this.logger.warn('Could not resolve reaction sender', String(error));
+          }
+        }
+
+        this.callbacks.onMessageReaction?.(incoming);
+      } catch (error) {
+        this.logger.error('Error processing incoming reaction', String(error));
+      }
     });
 
     this.client.on('disconnected', reason => {

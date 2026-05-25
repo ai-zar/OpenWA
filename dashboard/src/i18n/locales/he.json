@@ -238,9 +238,16 @@
     "eventDescriptions": {
       "message.received": "כאשר מתקבלת הודעה",
       "message.sent": "כאשר נשלחת הודעה",
-      "session.connected": "כאשר Session מתחבר",
-      "session.disconnected": "כאשר Session מתנתק",
+      "message.ack": "כאשר משתנה אישור מסירה/קריאה של הודעה",
+      "message.reaction": "כאשר נוספת, משתנה או מוסרת ריאקציה להודעה",
+      "message.revoked": "כאשר הודעה נמחקת לכולם",
+      "session.status": "כאשר משתנה מצב ה-Session",
       "session.qr": "כאשר נוצר קוד QR",
+      "session.authenticated": "כאשר ה-Session מאומת",
+      "session.disconnected": "כאשר Session מתנתק",
+      "group.join": "כאשר משתתף מצטרף לקבוצה",
+      "group.leave": "כאשר משתתף עוזב קבוצה",
+      "group.update": "כאשר מטא-דאטה של קבוצה מתעדכן",
       "all": "כל האירועים"
     }
   },

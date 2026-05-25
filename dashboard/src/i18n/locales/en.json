@@ -238,9 +238,16 @@
     "eventDescriptions": {
       "message.received": "When a message is received",
       "message.sent": "When a message is sent",
-      "session.connected": "When a session connects",
-      "session.disconnected": "When a session disconnects",
+      "message.ack": "When a message delivery/read receipt changes",
+      "message.reaction": "When a message reaction is added, changed or removed",
+      "message.revoked": "When a message is deleted for everyone",
+      "session.status": "When the session state changes",
       "session.qr": "When QR code is generated",
+      "session.authenticated": "When the session is authenticated",
+      "session.disconnected": "When a session disconnects",
+      "group.join": "When a participant joins a group",
+      "group.leave": "When a participant leaves a group",
+      "group.update": "When group metadata is updated",
       "all": "All events"
     }
   },

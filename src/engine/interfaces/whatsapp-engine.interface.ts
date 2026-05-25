@@ -64,6 +64,22 @@ export interface IncomingMessage {
   };
 }
 
+/**
+ * A reaction event emitted by whatsapp-web.js. `reaction` is the emoji; an
+ * empty string means the user removed their previous reaction. `msgId` points
+ * to the message that was reacted to (NOT the reaction event itself).
+ */
+export interface IncomingReaction {
+  id: string; // reaction event ID
+  msgId: string; // target message ID being reacted to
+  reaction: string; // emoji, or '' when removed
+  senderId: string; // canonical JID of the reactor
+  timestamp: number;
+  fromMe: boolean;
+  ack?: number;
+  fromContact?: ResolvedContact | null;
+}
+
 export interface Contact {
   id: string;
   name?: string;
@@ -221,6 +237,7 @@ export interface EngineEventCallbacks {
   onReady?: (phone: string, pushName: string) => void;
   onMessage?: (message: IncomingMessage) => void;
   onMessageAck?: (messageId: string, ack: number) => void;
+  onMessageReaction?: (reaction: IncomingReaction) => void;
   onDisconnected?: (reason: string) => void;
   onStateChanged?: (state: EngineStatus) => void;
 }

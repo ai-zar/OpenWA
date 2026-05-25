@@ -17,6 +17,7 @@ export type HookEvent =
   | 'message:sent'
   | 'message:failed'
   | 'message:ack'
+  | 'message:reaction'
   // Webhook lifecycle
   | 'webhook:before'
   | 'webhook:queued' // After webhook job added to queue (queue mode only)
