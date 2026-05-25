@@ -249,15 +249,11 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           ack: reaction.ack,
         };
 
-        // Resolve the reactor's contact (LID → @c.us if needed). Best-effort —
-        // if it fails the consumer still gets the raw senderId.
-        if (incoming.senderId && !incoming.fromMe) {
-          try {
-            incoming.fromContact = await this.resolveContact(incoming.senderId);
-          } catch (error) {
-            this.logger.warn('Could not resolve reaction sender', String(error));
-          }
-        }
+        // Resolve the reactor's contact (LID → @c.us if needed). Always sets
+        // `fromContact` — resolved object or explicit null — so the webhook
+        // payload mirrors `message.received` and consumers can rely on the key
+        // being present.
+        incoming.fromContact = incoming.senderId ? await this.resolveContact(incoming.senderId) : null;
 
         this.callbacks.onMessageReaction?.(incoming);
       } catch (error) {
