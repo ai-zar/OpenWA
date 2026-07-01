@@ -55,6 +55,9 @@ export interface WhatsAppWebJsConfig {
 }
 
 export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngine {
+  /** Special JID used by WhatsApp to publish status/story updates. */
+  private static readonly STATUS_BROADCAST_JID = 'status@broadcast';
+
   private client: Client | null = null;
   private status: EngineStatus = EngineStatus.DISCONNECTED;
   private qrCode: string | null = null;
@@ -361,23 +364,23 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.sendMediaMessage(chatId, media);
   }
 
-  private async sendMediaMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    this.ensureReady();
-
-    let messageMedia: MessageMedia;
-
+  private async buildMessageMedia(media: MediaInput): Promise<MessageMedia> {
     if (typeof media.data === 'string') {
       if (media.data.startsWith('http://') || media.data.startsWith('https://')) {
         // URL
-        messageMedia = await MessageMedia.fromUrl(media.data);
-      } else {
-        // Base64
-        messageMedia = new MessageMedia(media.mimetype, media.data, media.filename);
+        return MessageMedia.fromUrl(media.data);
       }
-    } else {
-      // Buffer
-      messageMedia = new MessageMedia(media.mimetype, media.data.toString('base64'), media.filename);
+      // Base64
+      return new MessageMedia(media.mimetype, media.data, media.filename);
     }
+    // Buffer
+    return new MessageMedia(media.mimetype, media.data.toString('base64'), media.filename);
+  }
+
+  private async sendMediaMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
+    this.ensureReady();
+
+    const messageMedia = await this.buildMessageMedia(media);
 
     const msg = await this.client!.sendMessage(chatId, messageMedia, {
       caption: media.caption,
@@ -1007,21 +1010,87 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return [];
   }
 
-  async postTextStatus(_text: string, _options?: TextStatusOptions): Promise<StatusResult> {
+  async postTextStatus(text: string, options?: TextStatusOptions): Promise<StatusResult> {
     this.ensureReady();
-    // whatsapp-web.js doesn't have native status posting
-    // This would require using the underlying WhatsApp Web API directly
-    throw new Error('postTextStatus not yet implemented in whatsapp-web.js adapter');
+    // whatsapp-web.js (>=1.34) posts status natively by sending to the
+    // `status@broadcast` JID. Background color / font travel via `extra`,
+    // which the internal status path reads as { backgroundColor, fontStyle }.
+    const msg = await this.client!.sendMessage(WhatsAppWebJsAdapter.STATUS_BROADCAST_JID, text, {
+      extra: {
+        backgroundColor: options?.backgroundColor,
+        fontStyle: options?.font,
+      },
+    });
+    return this.toStatusResult(msg);
   }
 
-  async postImageStatus(_media: MediaInput, _caption?: string): Promise<StatusResult> {
-    this.ensureReady();
-    throw new Error('postImageStatus not yet implemented in whatsapp-web.js adapter');
+  async postImageStatus(media: MediaInput, caption?: string): Promise<StatusResult> {
+    return this.postMediaStatus(media, caption);
   }
 
-  async postVideoStatus(_media: MediaInput, _caption?: string): Promise<StatusResult> {
+  async postVideoStatus(media: MediaInput, caption?: string): Promise<StatusResult> {
+    return this.postMediaStatus(media, caption);
+  }
+
+  private async postMediaStatus(media: MediaInput, caption?: string): Promise<StatusResult> {
     this.ensureReady();
-    throw new Error('postVideoStatus not yet implemented in whatsapp-web.js adapter');
+    await this.applyStatusMediaShims();
+    const messageMedia = await this.buildMessageMedia(media);
+    try {
+      const msg = await this.client!.sendMessage(WhatsAppWebJsAdapter.STATUS_BROADCAST_JID, messageMedia, {
+        caption,
+      });
+      return this.toStatusResult(msg);
+    } catch (err) {
+      // whatsapp-web.js 1.34.7's native media-status path calls
+      // WAWebSendStatusMsgAction.sendStatusMediaMsgAction(msg, mediaUpdate)
+      // positionally, but the current WhatsApp Web build changed that
+      // function's signature, so the send crashes inside WA Web
+      // ("Cannot read properties of undefined (reading 'id')"). Text status
+      // is unaffected. Surface a clear, actionable error instead of a raw 500.
+      this.logger.error(`postMediaStatus failed (upstream whatsapp-web.js/WA Web incompatibility): ${String(err)}`);
+      throw new Error(
+        'Media status posting is currently broken upstream in whatsapp-web.js against the live WhatsApp Web build. ' +
+          'Text status works. Track: WAWebSendStatusMsgAction.sendStatusMediaMsgAction signature drift.',
+      );
+    }
+  }
+
+  /**
+   * whatsapp-web.js 1.34.x builds the status media message with
+   * `WAWebStatusGatingUtils.canCheckStatusRankingPosterGating()`, but current
+   * WhatsApp Web builds no longer export that function, so the native media
+   * status path throws. Inject a no-op fallback (only if the real one is gone)
+   * so the msg model's `cannotBeRanked` field resolves. Text status is
+   * unaffected — it doesn't go through this path.
+   */
+  private async applyStatusMediaShims(): Promise<void> {
+    const page = (this.client as unknown as { pupPage: { evaluate: (fn: () => void) => Promise<void> } }).pupPage;
+    await page.evaluate(() => {
+      const w = window as unknown as { require: (id: string) => Record<string, unknown> };
+      try {
+        const gating = w.require('WAWebStatusGatingUtils');
+        if (gating && typeof gating.canCheckStatusRankingPosterGating !== 'function') {
+          gating.canCheckStatusRankingPosterGating = () => false;
+        }
+      } catch {
+        // module not present in this build — nothing to shim
+      }
+    });
+  }
+
+  /** Build a StatusResult from the whatsapp-web.js Message returned by a status send. */
+  private toStatusResult(msg: Awaited<ReturnType<Client['sendMessage']>> | undefined): StatusResult {
+    if (!msg) {
+      // sendMessage returns undefined/null when WhatsApp rejects the content type for status.
+      throw new Error('Status was not posted: content type not supported by status broadcast');
+    }
+    const ts = msg.timestamp ? new Date(msg.timestamp * 1000) : new Date();
+    return {
+      statusId: msg.id._serialized,
+      timestamp: ts,
+      expiresAt: new Date(ts.getTime() + 24 * 60 * 60 * 1000),
+    };
   }
 
   async deleteStatus(_statusId: string): Promise<void> {
