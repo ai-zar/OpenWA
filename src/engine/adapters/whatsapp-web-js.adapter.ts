@@ -1042,16 +1042,17 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       });
       return this.toStatusResult(msg);
     } catch (err) {
-      // whatsapp-web.js 1.34.7's native media-status path calls
-      // WAWebSendStatusMsgAction.sendStatusMediaMsgAction(msg, mediaUpdate)
-      // positionally, but the current WhatsApp Web build changed that
-      // function's signature, so the send crashes inside WA Web
-      // ("Cannot read properties of undefined (reading 'id')"). Text status
-      // is unaffected. Surface a clear, actionable error instead of a raw 500.
-      this.logger.error(`postMediaStatus failed (upstream whatsapp-web.js/WA Web incompatibility): ${String(err)}`);
+      // Media status is broken upstream: whatsapp-web.js 1.34.7 (and current
+      // `main`) build the status message with pre-LID WIDs, but the live
+      // WhatsApp Web `sendStatusMediaMsgAction` reconstructs it through
+      // `WAWebLidStatusMigrationUtils.matWidConvert` (PN<->LID migration) and
+      // crashes ("Cannot read properties of undefined (reading 'id')").
+      // Text status is unaffected. This will start working automatically once
+      // whatsapp-web.js adapts its status media path to the LID era.
+      this.logger.error(`postMediaStatus failed (whatsapp-web.js LID status incompatibility): ${String(err)}`);
       throw new Error(
-        'Media status posting is currently broken upstream in whatsapp-web.js against the live WhatsApp Web build. ' +
-          'Text status works. Track: WAWebSendStatusMsgAction.sendStatusMediaMsgAction signature drift.',
+        'Image/video status posting is currently blocked upstream: whatsapp-web.js has not adapted its ' +
+          'status-media path to WhatsApp Web’s LID migration. Text status works.',
       );
     }
   }
