@@ -40,6 +40,15 @@ import {
   GroupCreateResult,
 } from '../types/whatsapp-web-js.types';
 
+interface StatusMediaEvalResult {
+  ok: boolean;
+  stage?: string;
+  err?: string;
+  statusId?: string | null;
+  t?: number | null;
+  sendResult?: string;
+}
+
 export interface WhatsAppWebJsConfig {
   sessionId: string;
   sessionDataPath: string;
@@ -1032,29 +1041,111 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return this.postMediaStatus(media, caption);
   }
 
+  /**
+   * Post an image/video status.
+   *
+   * whatsapp-web.js's built-in status-media path is broken against the current
+   * (LID-era) WhatsApp Web: it calls `sendStatusMediaMsgAction(msg, mediaUpdate)`
+   * positionally, but the live module now takes a single object and reads
+   * `arg.mediaMsgData.id` → crashes with "reading 'id' of undefined". So we build
+   * the status message ourselves with LID WIDs and call the current signature
+   * `sendStatusMediaMsgAction({ mediaMsgData, beforeSend, funnelContext })`.
+   * Recipe confirmed in wwebjs/whatsapp-web.js#201807.
+   */
   private async postMediaStatus(media: MediaInput, caption?: string): Promise<StatusResult> {
     this.ensureReady();
     await this.applyStatusMediaShims();
     const messageMedia = await this.buildMessageMedia(media);
-    try {
-      const msg = await this.client!.sendMessage(WhatsAppWebJsAdapter.STATUS_BROADCAST_JID, messageMedia, {
-        caption,
-      });
-      return this.toStatusResult(msg);
-    } catch (err) {
-      // Media status is broken upstream: whatsapp-web.js 1.34.7 (and current
-      // `main`) build the status message with pre-LID WIDs, but the live
-      // WhatsApp Web `sendStatusMediaMsgAction` reconstructs it through
-      // `WAWebLidStatusMigrationUtils.matWidConvert` (PN<->LID migration) and
-      // crashes ("Cannot read properties of undefined (reading 'id')").
-      // Text status is unaffected. This will start working automatically once
-      // whatsapp-web.js adapts its status media path to the LID era.
-      this.logger.error(`postMediaStatus failed (whatsapp-web.js LID status incompatibility): ${String(err)}`);
-      throw new Error(
-        'Image/video status posting is currently blocked upstream: whatsapp-web.js has not adapted its ' +
-          'status-media path to WhatsApp Web’s LID migration. Text status works.',
-      );
+    const mediaInfo = {
+      mimetype: messageMedia.mimetype,
+      data: messageMedia.data,
+      filename: messageMedia.filename ?? undefined,
+    };
+    const page = (this.client as unknown as {
+      pupPage: { evaluate: (fn: (...a: unknown[]) => unknown, ...a: unknown[]) => Promise<StatusMediaEvalResult> };
+    }).pupPage;
+    const result = await page.evaluate(
+      async (mInfo: { mimetype: string; data: string; filename?: string }, cap?: string) => {
+        const w = window as unknown as {
+          require: (id: string) => Record<string, unknown>;
+          WWebJS: { processMediaData: (info: unknown, opts: unknown) => Promise<Record<string, unknown>> };
+        };
+        const req = w.require;
+        try {
+          const WidFactory = req('WAWebWidFactory') as { createWid: (jid: string) => unknown };
+          const MeUser = req('WAWebUserPrefsMeUser') as {
+            getMeDeviceLidOrThrow?: () => unknown;
+            getMaybeMeLidUser?: () => unknown;
+          };
+          const MsgKeyMod = req('WAWebMsgKey') as unknown as {
+            new (o: unknown): { toString(): string };
+            newId: () => Promise<string>;
+          };
+          const Action = req('WAWebSendStatusMsgAction') as {
+            sendStatusMediaMsgAction: (arg: unknown) => Promise<{ messageSendResult?: unknown; msg?: { id?: { _serialized?: string }; t?: number } }>;
+          };
+
+          const statusWid = WidFactory.createWid('status@broadcast');
+          const deviceLid = MeUser.getMeDeviceLidOrThrow?.();
+          const lidUser = MeUser.getMaybeMeLidUser?.();
+          if (!deviceLid || !lidUser) {
+            return { ok: false, stage: 'lid', err: 'LID identity required for media status' };
+          }
+          const from = deviceLid;
+          const author = lidUser;
+          const participant = author;
+
+          const newId = await MsgKeyMod.newId();
+          const newMsgKey = new MsgKeyMod({ fromMe: true, remote: statusWid, id: newId, participant });
+
+          const mediaOptions = await w.WWebJS.processMediaData(mInfo, { sendToStatus: true });
+          mediaOptions.caption = cap;
+          mediaOptions.isViewOnce = false;
+
+          const message = {
+            id: newMsgKey,
+            ack: 0,
+            from,
+            to: statusWid,
+            author: participant,
+            local: true,
+            self: 'out',
+            t: Math.floor(Date.now() / 1000),
+            isNewMsg: true,
+            type: 'chat',
+            body: mediaOptions.preview,
+            ...mediaOptions,
+            ...((mediaOptions as { toJSON?: () => object }).toJSON ? (mediaOptions as { toJSON: () => object }).toJSON() : {}),
+          };
+
+          const ret = await Action.sendStatusMediaMsgAction({
+            mediaMsgData: message,
+            beforeSend: async () => {},
+            funnelContext: undefined,
+          });
+          return {
+            ok: true,
+            statusId: ret?.msg?.id?._serialized ?? null,
+            t: ret?.msg?.t ?? null,
+            sendResult: typeof ret?.messageSendResult === 'string' ? (ret.messageSendResult as string) : typeof ret?.messageSendResult,
+          };
+        } catch (e) {
+          return { ok: false, stage: 'send', err: String(e).slice(0, 500) };
+        }
+      },
+      mediaInfo,
+      caption,
+    );
+    if (!result.ok) {
+      this.logger.error(`postMediaStatus failed [${result.stage}]: ${result.err}`);
+      throw new Error(`Failed to post media status: ${result.err}`);
     }
+    const ts = result.t ? new Date(result.t * 1000) : new Date();
+    return {
+      statusId: result.statusId ?? `status_${ts.getTime()}`,
+      timestamp: ts,
+      expiresAt: new Date(ts.getTime() + 24 * 60 * 60 * 1000),
+    };
   }
 
   /**
