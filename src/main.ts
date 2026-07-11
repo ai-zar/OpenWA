@@ -4,9 +4,15 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { ShutdownService } from './common/services/shutdown.service';
+import { installLogCapture } from './common/services/log-buffer';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
+
+// Tee stdout/stderr into an in-memory ring buffer so GET /api/logs-raw can
+// surface recent logs (incl. puppeteer stack traces) for remote debugging.
+// Installed first thing so early bootstrap output is captured too.
+installLogCapture();
 
 // Configuration loading order (later sources do NOT override earlier ones):
 //   1. Process env (Docker, shell, systemd) — highest priority
