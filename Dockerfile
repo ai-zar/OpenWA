@@ -28,7 +28,9 @@ RUN npm run build
 # ===== Stage 2: Production =====
 FROM node:22-slim AS production
 
-# Install Chrome/Chromium and required dependencies
+# Install Chromium + fonts/libs. NOTE: the `chromium` package is kept ONLY to pull
+# in the full shared-library closure Chrome needs at runtime; the actual browser
+# used by Puppeteer is its own pinned Chrome (installed below), NOT /usr/bin/chromium.
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
@@ -51,9 +53,14 @@ RUN apt-get update && apt-get install -y \
     dumb-init \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Chrome executable path for Puppeteer
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+# Use Puppeteer's OWN matched Chrome, NOT the distro chromium.
+# The apt `chromium` package (kept above only for its shared-library closure)
+# drifts to the newest major (e.g. 149), which breaks CDP against puppeteer-core
+# 24.38's expected Chrome 146 → "Promise was collected" / "Target closed" on heavy
+# ops (group add, send) and LOGOUT. Letting Puppeteer manage its own pinned Chrome
+# keeps the browser and the CDP client version-aligned across rebuilds.
+# Fixed cache dir so the build-time download matches runtime resolution (root HOME).
+ENV PUPPETEER_CACHE_DIR=/root/.cache/puppeteer
 
 # Create app user for security
 RUN groupadd -r openwa && useradd -r -g openwa openwa
@@ -65,6 +72,11 @@ COPY package*.json ./
 
 # Install production dependencies only
 RUN npm ci --omit=dev && npm cache clean --force
+
+# Download the Chrome build matched to the installed Puppeteer (into PUPPETEER_CACHE_DIR).
+# Puppeteer's npm install script normally does this, but we run it explicitly so the
+# build fails loudly if the matched Chrome can't be fetched.
+RUN npx puppeteer browsers install chrome
 
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
