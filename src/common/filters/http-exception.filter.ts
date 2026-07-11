@@ -1,9 +1,11 @@
-import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
+import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { ApiResponse } from '../interfaces/response.interface';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger('HttpException');
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -57,6 +59,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
         requestId: request.headers['x-request-id'] as string,
       },
     };
+
+    // Loguear SIEMPRE la excepción (antes no se logueaba nada → los 4xx/5xx eran
+    // invisibles en los logs del bridge). 5xx con stack; 4xx con detalle compacto.
+    const logCtx = `${request.method} ${request.originalUrl} → ${status} [${code}]`;
+    const detailStr = details ? ` ${JSON.stringify(details)}` : '';
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      this.logger.error(`${logCtx} ${message}${detailStr}`, exception instanceof Error ? exception.stack : undefined);
+    } else {
+      this.logger.warn(`${logCtx} ${message}${detailStr}`);
+    }
 
     response.status(status).json(errorResponse);
   }

@@ -1,22 +1,39 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
+import { IsString, IsNotEmpty, IsArray, ArrayNotEmpty } from 'class-validator';
 import { SessionService } from '../session/session.service';
 
 // DTOs
+// Los decoradores de class-validator son OBLIGATORIOS: el ValidationPipe global
+// (main.ts) corre con `forbidNonWhitelisted: true`, así que toda propiedad sin
+// al menos un decorador se considera no-whitelisted y la request se rechaza con
+// 400 antes de llegar al engine.
 class CreateGroupDto {
+  @IsString()
+  @IsNotEmpty()
   name: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
   participants: string[];
 }
 
 class ParticipantsDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
   participants: string[];
 }
 
 class GroupSubjectDto {
+  @IsString()
+  @IsNotEmpty()
   subject: string;
 }
 
 class GroupDescriptionDto {
+  @IsString()
   description: string;
 }
 
