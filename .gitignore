@@ -73,3 +73,6 @@ docker-compose.override.yml
 docs/plans/
 CLAUDE.md
 _docs/
+
+# Debug helper con API key hardcodeada — nunca commitear
+getlogs.ps1

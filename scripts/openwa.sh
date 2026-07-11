@@ -173,6 +173,65 @@ cmd_update() {
     log_success "Update complete"
 }
 
+# Clean a corrupt Chromium profile and restart (fixes "stuck at loading, no QR")
+# When wwebjs' session profile gets corrupted (e.g. after a Chromium crash-loop),
+# initialize() hangs with no QR and no error. Nuking the profile forces a fresh
+# QR. Deletes auth → you must re-scan. Usage: clean-restore [session-name] [--yes]
+cmd_clean_restore() {
+    local session_name=""
+    local assume_yes="false"
+    for arg in "$@"; do
+        case "$arg" in
+            --yes|-y) assume_yes="true" ;;
+            *) session_name="$arg" ;;
+        esac
+    done
+
+    cd "$PROJECT_DIR"
+    load_env
+
+    local sessions_path="/app/data/sessions"
+    local target
+    if [ -n "$session_name" ]; then
+        target="$sessions_path/session-$session_name"
+        log_warn "Se borrará el perfil de la sesión '$session_name' ($target)"
+    else
+        target="$sessions_path/session-*"
+        log_warn "Se borrarán TODOS los perfiles de sesión en $sessions_path"
+    fi
+    log_warn "La sesión quedará deslogueada → habrá que re-escanear el QR."
+
+    if [ "$assume_yes" != "true" ]; then
+        read -r -p "¿Continuar? [y/N] " ans
+        case "$ans" in
+            y|Y) ;;
+            *) log_info "Cancelado"; return 0 ;;
+        esac
+    fi
+
+    log_info "Borrando perfil(es) de Chromium y cache de wwebjs..."
+    # Preferimos exec (contenedor vivo, que es el caso normal cuando se cuelga).
+    # Fallback a un contenedor temporal que monta el volumen si el api está caído.
+    if docker compose exec -T openwa-api sh -c "rm -rf $target /app/.wwebjs_cache" 2>/dev/null; then
+        log_success "Perfil(es) borrado(s)"
+    else
+        log_warn "No se pudo via exec (¿contenedor caído?); intento con contenedor temporal..."
+        if docker compose run --rm --no-deps -T --entrypoint sh openwa-api -c "rm -rf $target"; then
+            log_success "Perfil(es) borrado(s) (volumen)"
+        else
+            log_error "No se pudo borrar el perfil"
+            return 1
+        fi
+    fi
+
+    log_info "Reiniciando openwa-api con perfil limpio..."
+    docker compose restart openwa-api
+
+    echo ""
+    log_success "Listo. Andá al dashboard y dale Start → debería mostrar un QR limpio."
+    log_info "Dashboard: http://localhost:${DASHBOARD_PORT:-2886}"
+}
+
 # Show help
 cmd_help() {
     echo ""
@@ -188,6 +247,8 @@ cmd_help() {
     echo "  logs        Show logs (default: openwa-api)"
     echo "  build       Build Docker images"
     echo "  update      Pull latest code and restart"
+    echo "  clean-restore [session] [--yes]  Borra el perfil de Chromium corrupto y reinicia"
+    echo "                                   (arregla 'stuck loading / sin QR'; requiere re-escanear)"
     echo "  help        Show this help"
     echo ""
     echo "Profile activation is automatic based on .env:"
@@ -206,6 +267,7 @@ case "${1:-help}" in
     logs)    cmd_logs "${2:-}" "${3:-}" ;;
     build)   cmd_build ;;
     update)  cmd_update ;;
+    clean-restore|cleanrestore) cmd_clean_restore "${@:2}" ;;
     help)    cmd_help ;;
     *)
         log_error "Unknown command: $1"
