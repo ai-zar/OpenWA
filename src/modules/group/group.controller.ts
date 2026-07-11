@@ -89,8 +89,14 @@ export class GroupController {
     @Body() dto: ParticipantsDto,
   ) {
     const engine = this.getEngine(sessionId);
-    await engine.addParticipants(groupId, dto.participants);
-    return { success: true, message: 'Participants added' };
+    const results = await engine.addParticipants(groupId, dto.participants);
+    const summary = results.reduce<Record<string, number>>((acc, r) => {
+      acc[r.status] = (acc[r.status] || 0) + 1;
+      return acc;
+    }, {});
+    // invite_only (403) participants are NOT added — invite them via the group link.
+    const needInvite = results.filter(r => r.status === 'invite_only').map(r => r.id);
+    return { success: true, summary, results, needInvite };
   }
 
   @Delete(':groupId/participants')

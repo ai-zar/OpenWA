@@ -16,6 +16,7 @@ import {
   Group,
   GroupInfo,
   GroupParticipant,
+  AddParticipantResult,
   LocationInput,
   ContactCard,
   MessageReaction,
@@ -706,21 +707,84 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     };
   }
 
-  async addParticipants(groupId: string, participants: string[]): Promise<void> {
+  /**
+   * Add participants defensively. A single big addParticipants() runs one long
+   * page.evaluate() that WhatsApp Web can reload out from under (→ "Promise was
+   * collected" / "sendIq before startComms" → the session drops with LOGOUT).
+   * We instead add in small chunks, wait for the page to be CONNECTED before
+   * each chunk, retry transient page errors, and return a per-participant report
+   * (added / invite_only / not_registered / already_member) instead of void.
+   * `autoSendInviteV4: false` keeps invite-only (403) participants from triggering
+   * the crashy invite branch — invite those via the group link instead.
+   */
+  async addParticipants(groupId: string, participants: string[]): Promise<AddParticipantResult[]> {
     this.ensureReady();
     const chat = await this.client!.getChatById(groupId);
     if (!chat.isGroup) {
       throw new Error('Chat is not a group');
     }
-    const participantIds = participants.map(p => normalizeToJid(p));
-    // `autoSendInviteV4: false` — mismo motivo que en createGroup: para un
-    // participante con privacidad "solo por invitación" (403), whatsapp-web.js
-    // intenta enviarle un invite y esa rama puede lanzar DESPUÉS de haber
-    // agregado a otros, devolviendo un 500. Desactivándolo, esos participantes
-    // quedan sin agregar (se los invita con el invite-link) y no revienta.
-    await (chat as unknown as GroupChat).addParticipants(participantIds, {
-      autoSendInviteV4: false,
-    });
+    const groupChat = chat as unknown as GroupChat;
+    const ids = participants.map(p => normalizeToJid(p));
+
+    const CHUNK_SIZE = 3;
+    const PAUSE_BETWEEN_CHUNKS_MS = 2500;
+    const results: AddParticipantResult[] = [];
+
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const batch = ids.slice(i, i + CHUNK_SIZE);
+      await this.waitForConnected(20000);
+
+      const raw = await this.withPageRetry(() => groupChat.addParticipants(batch, { autoSendInviteV4: false }));
+
+      if (typeof raw === 'string') {
+        // Group-level error (empty group / not admin) — applies to the whole batch.
+        for (const id of batch) results.push({ id, code: null, status: 'error', message: raw });
+      } else {
+        for (const id of batch) results.push(mapAddParticipantResult(id, raw?.[id]));
+      }
+
+      if (i + CHUNK_SIZE < ids.length) await sleep(PAUSE_BETWEEN_CHUNKS_MS);
+    }
+
+    return results;
+  }
+
+  /** Wait until WhatsApp Web reports CONNECTED (comms started). Throws on timeout. */
+  private async waitForConnected(timeoutMs: number): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const state = await this.client!.getState();
+        if (String(state) === 'CONNECTED') return;
+      } catch {
+        // page mid-reload — getState throws; keep polling
+      }
+      await sleep(1000);
+    }
+    throw new Error('WhatsApp page not CONNECTED within timeout');
+  }
+
+  /**
+   * Retry a page operation that failed with a transient puppeteer/WA error caused
+   * by the page reloading mid-evaluate. Non-transient errors propagate immediately.
+   */
+  private async withPageRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 2500): Promise<T> {
+    const TRANSIENT =
+      /Promise was collected|Execution context was destroyed|Target closed|sendIq called before startComms|Cannot read properties of (?:undefined|null)/i;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!TRANSIENT.test(msg)) throw err;
+        this.logger.warn(`Transient page error (attempt ${attempt + 1}/${retries + 1}), retrying`, msg);
+        await sleep(delayMs);
+        await this.waitForConnected(20000).catch(() => undefined);
+      }
+    }
+    throw lastErr;
   }
 
   async removeParticipants(groupId: string, participants: string[]): Promise<void> {
@@ -1258,4 +1322,31 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       throw new Error('WhatsApp client is not ready');
     }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Map a wwebjs per-participant result ({ code, message }) to our AddParticipantResult. */
+function mapAddParticipantResult(
+  id: string,
+  raw: { code?: number; message?: string } | undefined,
+): AddParticipantResult {
+  const code = raw?.code ?? null;
+  const status: AddParticipantResult['status'] =
+    code === 200
+      ? 'added'
+      : code === 403
+        ? 'invite_only'
+        : code === 404
+          ? 'not_registered'
+          : code === 409
+            ? 'already_member'
+            : code === 408
+              ? 'left_recently'
+              : code === 419
+                ? 'group_full'
+                : 'error';
+  return { id, code, status, message: raw?.message };
 }

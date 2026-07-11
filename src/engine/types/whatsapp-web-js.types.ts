@@ -19,7 +19,12 @@ export interface GroupChat extends Omit<Chat, 'isReadOnly' | 'getLabels'> {
   createdAt?: number;
   isReadOnly?: boolean;
   isAnnounce?: boolean;
-  addParticipants(ids: string[], options?: { autoSendInviteV4?: boolean; comment?: string }): Promise<void>;
+  // Returns a dict keyed by participant id ({ code, message, isInviteV4Sent }), OR a
+  // string on a group-level error (empty group / not admin). See wwebjs GroupChat.
+  addParticipants(
+    ids: string[],
+    options?: { autoSendInviteV4?: boolean; comment?: string; sleep?: number | number[] },
+  ): Promise<Record<string, { code?: number; message?: string; isInviteV4Sent?: boolean }> | string>;
   removeParticipants(ids: string[]): Promise<void>;
   promoteParticipants(ids: string[]): Promise<void>;
   demoteParticipants(ids: string[]): Promise<void>;

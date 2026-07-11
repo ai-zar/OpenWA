@@ -106,6 +106,14 @@ export interface GroupParticipant {
   isSuperAdmin: boolean;
 }
 
+/** Per-participant outcome of addParticipants (mirrors WhatsApp Web result codes). */
+export interface AddParticipantResult {
+  id: string;
+  code: number | null;
+  status: 'added' | 'invite_only' | 'not_registered' | 'already_member' | 'left_recently' | 'group_full' | 'error';
+  message?: string;
+}
+
 export interface GroupInfo {
   id: string;
   name: string;
@@ -287,7 +295,7 @@ export interface IWhatsAppEngine {
   // Groups - Extended (Phase 3)
   getGroupInfo(groupId: string): Promise<GroupInfo | null>;
   createGroup(name: string, participants: string[]): Promise<Group>;
-  addParticipants(groupId: string, participants: string[]): Promise<void>;
+  addParticipants(groupId: string, participants: string[]): Promise<AddParticipantResult[]>;
   removeParticipants(groupId: string, participants: string[]): Promise<void>;
   promoteParticipants(groupId: string, participants: string[]): Promise<void>;
   demoteParticipants(groupId: string, participants: string[]): Promise<void>;
