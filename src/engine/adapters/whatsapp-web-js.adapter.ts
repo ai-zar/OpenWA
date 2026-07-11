@@ -676,9 +676,29 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.ensureReady();
     // Ensure participant IDs are in correct format
     const participantIds = participants.map(p => normalizeToJid(p));
-    const result = await this.client!.createGroup(name, participantIds);
 
-    const groupId = String((result as unknown as GroupCreateResult).gid._serialized);
+    // `autoSendInviteV4: false` — si un participante tiene privacidad "solo por
+    // invitación" (statusCode 403), whatsapp-web.js intenta enviarle un invite y
+    // esa rama puede lanzar una excepción DESPUÉS de que el grupo ya se creó,
+    // devolviendo un 500 aunque el grupo exista. Desactivándolo, esos
+    // participantes simplemente quedan sin agregar (se los invita luego con el
+    // invite-link) y createGroup resuelve limpio.
+    const result = await this.client!.createGroup(name, participantIds, {
+      autoSendInviteV4: false,
+    });
+
+    // En caso de error interno, whatsapp-web.js devuelve un string
+    // ('CreateGroupError: ...') en vez del objeto con `gid`. Lo tratamos como
+    // fallo explícito en vez de reventar con un TypeError opaco.
+    if (typeof result === 'string') {
+      throw new Error(result);
+    }
+
+    const gid = (result as unknown as GroupCreateResult).gid;
+    const groupId = String(gid?._serialized ?? gid);
+    if (!groupId || groupId === 'undefined') {
+      throw new Error('createGroup: respuesta sin gid del cliente de WhatsApp');
+    }
     return {
       id: groupId,
       name: name,
@@ -693,7 +713,14 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       throw new Error('Chat is not a group');
     }
     const participantIds = participants.map(p => normalizeToJid(p));
-    await (chat as unknown as GroupChat).addParticipants(participantIds);
+    // `autoSendInviteV4: false` — mismo motivo que en createGroup: para un
+    // participante con privacidad "solo por invitación" (403), whatsapp-web.js
+    // intenta enviarle un invite y esa rama puede lanzar DESPUÉS de haber
+    // agregado a otros, devolviendo un 500. Desactivándolo, esos participantes
+    // quedan sin agregar (se los invita con el invite-link) y no revienta.
+    await (chat as unknown as GroupChat).addParticipants(participantIds, {
+      autoSendInviteV4: false,
+    });
   }
 
   async removeParticipants(groupId: string, participants: string[]): Promise<void> {

@@ -19,7 +19,7 @@ export interface GroupChat extends Omit<Chat, 'isReadOnly' | 'getLabels'> {
   createdAt?: number;
   isReadOnly?: boolean;
   isAnnounce?: boolean;
-  addParticipants(ids: string[]): Promise<void>;
+  addParticipants(ids: string[], options?: { autoSendInviteV4?: boolean; comment?: string }): Promise<void>;
   removeParticipants(ids: string[]): Promise<void>;
   promoteParticipants(ids: string[]): Promise<void>;
   demoteParticipants(ids: string[]): Promise<void>;
