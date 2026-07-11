@@ -163,13 +163,18 @@ cmd_build() {
     log_success "Build complete"
 }
 
-# Update (pull + build + restart)
+# Update (pull + build + restart + prune)
 cmd_update() {
     log_info "Updating OpenWA..."
     cd "$PROJECT_DIR"
     git pull
     cmd_build
     cmd_restart
+    # Reclaim disk: each rebuild leaves the previous image untagged (dangling).
+    # `-f` = no prompt; NOT `-a` (that would remove images of stopped/optional
+    # profiles like minio/redis that aren't running right now).
+    log_info "Pruning dangling images..."
+    docker image prune -f
     log_success "Update complete"
 }
 
