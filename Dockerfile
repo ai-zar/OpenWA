@@ -6,11 +6,13 @@ FROM node:22-slim AS builder
 
 WORKDIR /app
 
-# Install build dependencies
+# Install build dependencies (git: needed to resolve the whatsapp-web.js
+# GitHub-pinned dependency — PR #201832 fix for the July 2026 WA Web update)
 RUN apt-get update && apt-get install -y \
     python3 \
     make \
     g++ \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
@@ -51,6 +53,7 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     xdg-utils \
     dumb-init \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Use Puppeteer's OWN matched Chrome, NOT the distro chromium.
