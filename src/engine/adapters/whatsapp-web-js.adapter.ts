@@ -249,12 +249,19 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     // Reactions: emitted when a reaction is sent, received, updated or removed.
     // `reaction.reaction` is an empty string when the user removed their previous
     // reaction — downstream consumers can use that to invalidate prior state.
+    //
+    // `reaction.id`/`reaction.msgId` come straight off the WAWebAddonReactionTableMode
+    // raw key objects (Client.js `reactionTableMode.bulkUpsert` hook → Reaction._patch),
+    // a code path the upstream `$1` → `_serialized` compat fix (2026-07 WA Web update,
+    // see ADR-2026-07-25-wwebjs-serialized-fix.md) never covered — it only patched
+    // Message/Chat/Contact/GroupChat et al. So unlike every other `.id._serialized`
+    // read in this adapter, these two still need the `$1` fallback by hand.
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
     this.client.on('message_reaction', async reaction => {
       try {
         const incoming: IncomingReaction = {
-          id: reaction.id?._serialized || '',
-          msgId: reaction.msgId?._serialized || '',
+          id: this.serializeWaKey(reaction.id) || '',
+          msgId: this.serializeWaKey(reaction.msgId) || '',
           reaction: reaction.reaction || '',
           senderId: reaction.senderId,
           timestamp: reaction.timestamp,
@@ -440,6 +447,21 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.ensureReady();
     const numberId = await this.client!.getNumberId(number);
     return numberId !== null;
+  }
+
+  /**
+   * Serializes a raw WhatsApp Web id/key object to its string form.
+   *
+   * Normally `.id._serialized` from whatsapp-web.js structures (Message, Chat,
+   * Contact…) is already patched upstream for the July 2026 WA Web rename
+   * (`_serialized` → `$1`, see ADR-2026-07-25-wwebjs-serialized-fix.md). But
+   * raw key objects that bypass that patched `_patch()` path — like the
+   * reaction table's `msgKey`/`parentMsgKey` — can still only carry `$1`.
+   * This falls back to `$1` for those cases.
+   */
+  private serializeWaKey(key: unknown): string {
+    const k = key as { _serialized?: string; $1?: string } | null | undefined;
+    return k?._serialized || k?.$1 || '';
   }
 
   /**

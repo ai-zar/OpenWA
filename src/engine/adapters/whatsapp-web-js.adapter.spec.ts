@@ -104,3 +104,29 @@ describe('WhatsAppWebJsAdapter.resolveContact', () => {
     expect(getContactById).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('WhatsAppWebJsAdapter.serializeWaKey', () => {
+  // Regression guard for the reaction-msgId-goes-null bug: the July 2026 WA
+  // Web update renamed `_serialized` to `$1` on raw key objects. Upstream
+  // whatsapp-web.js patched Message/Chat/Contact/GroupChat to always expose
+  // `_serialized`, but the reaction table's raw `msgKey`/`parentMsgKey` never
+  // went through that patch — this helper is the adapter-side fallback.
+  function callSerializeWaKey(key: unknown): string {
+    const adapter = makeAdapter({});
+    return (adapter as unknown as { serializeWaKey(k: unknown): string }).serializeWaKey(key);
+  }
+
+  it('prefers `_serialized` when present', () => {
+    expect(callSerializeWaKey({ _serialized: 'true_123@c.us_ABC', $1: 'ignored' })).toBe('true_123@c.us_ABC');
+  });
+
+  it('falls back to `$1` when `_serialized` is missing (WA Web 2026-07 rename)', () => {
+    expect(callSerializeWaKey({ $1: 'true_123@c.us_ABC' })).toBe('true_123@c.us_ABC');
+  });
+
+  it('returns empty string for null/undefined/empty keys', () => {
+    expect(callSerializeWaKey(null)).toBe('');
+    expect(callSerializeWaKey(undefined)).toBe('');
+    expect(callSerializeWaKey({})).toBe('');
+  });
+});
